@@ -42,8 +42,7 @@ MGLpoly_mode Mode;
 MGLmatrix_mode MMode;
 //Global color
 vec3 color;
-mat4 projection_matrix;
-mat4 modelview_matrix;
+mat4 matrix;
 //list of vertex
 vector<vertex> vertices;
 
@@ -59,14 +58,7 @@ inline void MGL_ERROR(const char* description) {
     printf("%s\n", description);
     exit(1);
 }
-//Helper function
-mat4& current_matrix(){
-  if(MMode == MGL_PROJECTION){
-    return projection_matrix;
-  }else{
-    return modelview_matrix;
-  }
-}
+
 
 /**
  * Read pixel data starting with the pixel at coordinates
@@ -224,8 +216,8 @@ void mglVertex3(MGLfloat x,
   tempv[3] = 1.0f;
 
   //cout <<"tempv: "<<tempv<<endl;
-  tempv = projection_matrix* modelview_matrix* tempv;
-  //cout <<"Matrix "<< cmat << endl;
+  tempv = matrix * tempv;
+  //cout <<"Matrix "<< matrix << endl;
   //cout <<"tempv3: "<< tempv[3]<<endl;
   vertex temp(tempv/tempv[3],color);
 
@@ -265,12 +257,12 @@ void mglPopMatrix()
  */
 void mglLoadIdentity()
 {
-   mat4 I = {{1.0f,0.0f,0.0f,0.0f,
-             0.0f,1.0f,0.0f,0.0f,
-             0.0f,0.0f,1.0f,0.0f,
-             0.0f,0.0f,0.0f,1.0f}};
-    mat4& cmat = current_matrix();
-    cmat = I;
+    if(MMode == MGL_PROJECTION)
+      matrix = {{1.0f,0.0f,0.0f,0.0f,
+                 0.0f,1.0f,0.0f,0.0f,
+                 0.0f,0.0f,1.0f,0.0f,
+                 0.0f,0.0f,0.0f,1.0f}};
+
 }
 
 /**
@@ -349,21 +341,20 @@ void mglFrustum(MGLfloat left,
                 MGLfloat near,
                 MGLfloat far)
 {
-
+    if(MMode == MGL_PROJECTION){
         float A = (right + left)/(right -left);
         float B = (top + bottom)/(top-bottom);
         float C = -(far + near)/(far - near);
         float D = - 2*(far*near)/(far - near);
-
-        mat4& cmat = current_matrix();
 
         mat4 temp = {{2*near/(right-left),0,0,0,
                       0, 2*near/(top-bottom),0,0,
                       A,B,C,-1,
                       0,0,D,0}};
 
-        cmat = temp*cmat;
+        matrix = temp*matrix;
 
+    }
 }
 
 /**
@@ -378,6 +369,7 @@ void mglOrtho(MGLfloat left,
               MGLfloat far)
 {
 
+  if (MMode == MGL_PROJECTION){
     float tx = -(right+left)/(right-left);
     float ty = -(top+bottom)/(top-bottom);
     float tz = -(far + near)/(far - near);
@@ -387,14 +379,14 @@ void mglOrtho(MGLfloat left,
                  0.0f,0.0f, -2.0f/(far-near), tz,
                  0.0f,0.0f,0.0f,1.0f}};*/
 
-      mat4& cmat = current_matrix();
-
       mat4 temp = {{2.0f/(right-left),0.0f,0.0f,0.0f,
                   0.0f,2.0f/(top-bottom),0.0f,0.0f,
                   0.0f,0.0f,-2.0f/(far-near),0.0f,
                   tx,ty,tz,1.0f}};
 
-     cmat = temp*cmat;
+      matrix = temp*matrix;
+  }
+
 
 }
 
