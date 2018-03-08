@@ -66,7 +66,7 @@ MGLmatrix_mode MMode;
 vec3 color;
 //list of vertex
 vector<vertex> vertices;
-vector<MGLfloat> z_buffering;
+vector<float> z_buffering;
 
 //stack of matrix
 mat4 I = {{1.0f,0.0f,0.0f,0.0f,
@@ -89,17 +89,7 @@ inline void MGL_ERROR(const char* description) {
     printf("%s\n", description);
     exit(1);
 }
-//Helper function
-/*
-mat4& current_matrix(){
-  if(MMode == MGL_PROJECTION){
-    return projection_matrix;
-  }else{
-    return modelview_matrix;
-  }
-}*/
-
-//helper fuction
+//helper fuction makes life easy
 mat4& top_of_active_matrix_stack(){
   if(MMode == MGL_PROJECTION){
     return Matrix_stack_projection.back();
@@ -124,7 +114,7 @@ void mglReadPixels(MGLsize width,
                    MGLpixel *data)
 {
 
-
+  //easy way to do below
   memset(data, 0, sizeof(MGLpixel)*width * height);
   #if 0
   for(unsigned i = 0; i < width; i++){
@@ -133,14 +123,14 @@ void mglReadPixels(MGLsize width,
     }
   }
   #endif
-  z_buffering.assign(width*height,100000000);
+  z_buffering.assign(width*height, 10000);
 
   for(unsigned i = 0; i < Triangles.size();i++){
     Rasterize_Triangle(Triangles[i],width, height,data);
   }
   Triangles.clear();
 }
-
+//
 float triangle_area(vec2 a, vec2 b, vec2 c){
     return (a[0]*(b[1]-c[1])+ a[1]*(c[0] - b[0]) + (b[0]*c[1] - b[1]*c[0]));
 }
@@ -150,109 +140,84 @@ void Rasterize_Triangle(const Triangle &tri,
                         int height,
                         MGLpixel* data)
 {
-  //z-buffering
-  MGLfloat* zptr = z_buffering.data();
-
+  //correct w values for vertices used in perspective correct interpolation
   MGLfloat Az, Bz, Cz, wa, wb, wc;
   wa = tri.a.pos[3];
   wb = tri.b.pos[3];
   wc = tri.c.pos[3];
 
-  printf("wa: %f, wb: %f,wc: %f\n",wa,wb,wc );
+  //used for z buffering
   Az = tri.a.pos[2]/abs(wa);
   Bz = tri.b.pos[2]/abs(wb);
   Cz = tri.c.pos[2]/abs(wc);
 
+  //on screen coordinates
   vec2 a, b, c;
-  a[0] = (tri.a.pos[0] + 1)*width/2 -0.5;
-  a[1] = (tri.a.pos[1] + 1)*height/2 - 0.5;
+  a[0] = (tri.a.pos[0]/wa + 1)*width/2 -0.5;
+  a[1] = (tri.a.pos[1]/wa + 1)*height/2 - 0.5;
 
-  b[0] = (tri.b.pos[0] + 1)*width/2 -0.5;
-  b[1] = (tri.b.pos[1] + 1)*height/2 - 0.5;
+  b[0] = (tri.b.pos[0]/wb + 1)*width/2 -0.5;
+  b[1] = (tri.b.pos[1]/wb + 1)*height/2 - 0.5;
 
-  c[0] = (tri.c.pos[0] + 1)*width/2 -0.5;
-  c[1] = (tri.c.pos[1] + 1)*height/2 - 0.5;
-
-  // cout << "a[0] ="<< a[0]<< " a[1] ="<< a[1]<<endl;
-  // cout << "b[0] ="<< b[0]<< " b[1] ="<< b[1]<<endl;
-  // cout << "c[0] ="<< c[0]<< " c[1] ="<< c[1]<<endl;
+  c[0] = (tri.c.pos[0]/wc + 1)*width/2 -0.5;
+  c[1] = (tri.c.pos[1]/wc + 1)*height/2 - 0.5;
 
   int mini, minj, maxi, maxj;
-
+  //reduce the amount of pixels that need to be computed
   mini = min(a[0], min(b[0],c[0]));
-  mini = max(min(width,mini - 2), 0);
+  mini = max(min(width,mini - 3), 0);
 
   minj = min(a[1], min(b[1],c[1]));
-  minj = max(min(height,minj - 2), 0);
+  minj = max(min(height,minj - 3), 0);
 
   maxi = max(a[0], max(b[0],c[0]));
-  maxi = min(width , max(maxi + 2, 0));
+  maxi = min(width , max(maxi + 3, 0));
 
   maxj = max(a[1], max(b[1],c[1]));
-  maxj = max(0 , min(maxj + 2, height));
+  maxj = max(0 , min(maxj + 3, height));
+  //z-buffering must be updated
 
-  // cout<< "mini " << mini << " maxi " << maxi << endl;
-  //
-  // cout<< "minj " << minj << " maxj " << maxj << endl;
-  if(MMode == MGL_MODELVIEW){
-    //cout << "Here"<<endl;
-    mini = 0;
-    maxi = width;
-    minj = 0;
-    maxj = height;
-  }
-
+  //calculate the triangle onces hear
   float area = triangle_area(a,b,c);
-  for(int j = minj; j< maxj; ++j){
-    for(int i = mini; i < maxi; ++i,++zptr ){
-  // for(int j = 0; j< width; ++j){
-  //   for(int i = 0; i < height; ++i,++zptr ){
+  //go over reduce pixels count dramatically test 25 ++
+  for(int j = minj; j < maxj; ++j){
+    for(int i = mini; i < maxi; ++i){
 
       vec2 p;
       p[0] = i;
       p[1] = j;
 
+      //baricentric coordinate to calculate if point inside of triagle
       float alpha = triangle_area(p,b,c)/area;
       float beta = triangle_area(a,p,c)/area;
       float gamma = triangle_area(a,b,p)/area;
 
-
-
+      //correct z buffer value
       float z_current = Az*alpha + Bz*beta+ Cz*gamma;
 
-      //z_current = std::clamp(z_current,-1.0f, 1.0f);
+      //if point inside of triagle
       if(alpha >= 0 && beta >= 0 && gamma >=0 ){
-        if(*zptr > z_current){
+        //if z value less then what is in the buffer test 15
+        if(z_current <= z_buffering[i+j*width]){
+            //clipping test 20+
             if(z_current >= -1.0f && z_current <= 1.0f ){
-                //printf("1. alpha:%f ,beta: %f, gamma: %f\n", alpha, beta, gamma);
                 //perspective correct interpolations
-                float K = 1 /(alpha *wa + beta * wb + gamma*wc);
-
-                float alpha_p = alpha * wa * K;
-                float beta_p = beta *wb *K;
-                float gamma_p = gamma * wc * K;
-                  //K =  1/ (alpha_p/ wa + beta_p/wb + gamma_p/wc);
-                alpha = alpha_p / (wa* K);
-                beta = beta_p /( wb * K) ;
-                gamma = gamma_p /( wc *K);
-                //printf("2. alpha:%f ,beta: %f, gamma: %f\n", alpha_p, beta_p, gamma_p);
-                K = (alpha_p/ wa + beta_p/wb + gamma_p/wc);
-                alpha = (alpha_p / wa)/ K;
-                beta = (beta_p /wb) / K ;
-                gamma = (gamma_p / wc) /K;
-
-                //printf("3. alpha:%f ,beta: %f, gamma: %f\n", alpha, beta, gamma);
+                float K = (alpha/ wa + beta/wb + gamma/wc);
+                alpha = alpha /( wa* K);
+                beta = beta /(wb * K );
+                gamma = gamma/ (wc*K);
 
                 float percent_red = tri.a.color[0]*255*alpha + tri.b.color[0]*255*beta +tri.c.color[0]*255*gamma;
                 float percent_green = tri.a.color[1]*255*alpha + tri.b.color[1]*255*beta +tri.c.color[1]*255*gamma;
                 float percent_blue = tri.a.color[2]*255*alpha + tri.b.color[2]*255*beta +tri.c.color[2]*255*gamma;
                 data[i+j*width] = Make_Pixel(percent_red,percent_green,percent_blue);
-                *zptr = z_current;
-          }
-        }
-      }
-    }
-  }
+                z_buffering[i +j*width] = z_current;
+           }
+
+         }
+       }
+     }
+   }
 }
 
 /**
@@ -338,12 +303,10 @@ void mglVertex3(MGLfloat x,
   tempv[2] = z;
   tempv[3] = 1.0f;
 
-  //cout <<"tempv: "<<tempv<<endl;
-  //tempv = projection_matrix* modelview_matrix* tempv;
+  //apply transnformation to vertice
   tempv = Matrix_stack_projection.back()* Matrix_stack_modelview.back()* tempv;
-  //cout <<"Matrix "<< cmat << endl;
-  //cout <<"tempv3: "<< tempv[3]<<endl;
-  vertex temp(tempv/tempv[3],color);
+  vertex temp(tempv,color);
+
 
  //cout << "temp.pos " << temp.pos<<endl;
   vertices.push_back(temp);
