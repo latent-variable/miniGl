@@ -37,15 +37,46 @@ typedef vec<MGLfloat,4> vec4;   //data structure storing a 4 dimensional vector,
 typedef vec<MGLfloat,3> vec3;   //data structure storing a 3 dimensional vector, see vec.h
 typedef vec<MGLfloat,2> vec2;   //data structure storing a 2 dimensional vector, see vec.h
 
+//******************************************************
+//vertex structure
+struct vertex
+{
 
+  vertex(){}
+  vertex(vec4 p,vec3 c):  color(c),pos(p){}
+  vec3 color;
+  vec4 pos;
+};
+
+//structure that stores the 3 vertices of a triangle
+struct Triangle
+{
+  vertex a,b,c;
+};
+
+//Helper fuction for mglReadPixels
+void Rasterize_Triangle(const Triangle &tri,
+                       int width,
+                       int height,
+                       MGLpixel* data);
+//******************************************************
 MGLpoly_mode Mode;
 MGLmatrix_mode MMode;
 //Global color
 vec3 color;
-mat4 matrix;
 //list of vertex
 vector<vertex> vertices;
+vector<MGLfloat> z_buffering;
 
+//stack of matrix
+mat4 I = {{1.0f,0.0f,0.0f,0.0f,
+            0.0f,1.0f,0.0f,0.0f,
+            0.0f,0.0f,1.0f,0.0f,
+            0.0f,0.0f,0.0f,1.0f}};
+vector<mat4> Matrix_stack_projection = {I};
+
+
+vector<mat4> Matrix_stack_modelview = {I};
 
 //list of triangles
 vector<Triangle> Triangles;
@@ -58,8 +89,24 @@ inline void MGL_ERROR(const char* description) {
     printf("%s\n", description);
     exit(1);
 }
+//Helper function
+/*
+mat4& current_matrix(){
+  if(MMode == MGL_PROJECTION){
+    return projection_matrix;
+  }else{
+    return modelview_matrix;
+  }
+}*/
 
-
+//helper fuction
+mat4& top_of_active_matrix_stack(){
+  if(MMode == MGL_PROJECTION){
+    return Matrix_stack_projection.back();
+  }else{
+    return Matrix_stack_modelview.back();
+  }
+}
 /**
  * Read pixel data starting with the pixel at coordinates
  * (0, 0), up to (width,  height), into the array
@@ -76,6 +123,8 @@ void mglReadPixels(MGLsize width,
                    MGLsize height,
                    MGLpixel *data)
 {
+
+
   memset(data, 0, sizeof(MGLpixel)*width * height);
   #if 0
   for(unsigned i = 0; i < width; i++){
@@ -84,6 +133,7 @@ void mglReadPixels(MGLsize width,
     }
   }
   #endif
+  z_buffering.assign(width*height,100000000);
 
   for(unsigned i = 0; i < Triangles.size();i++){
     Rasterize_Triangle(Triangles[i],width, height,data);
@@ -100,6 +150,17 @@ void Rasterize_Triangle(const Triangle &tri,
                         int height,
                         MGLpixel* data)
 {
+  //z-buffering
+  MGLfloat* zptr = z_buffering.data();
+
+  MGLfloat Az, Bz, Cz, wa, wb, wc;
+  wa = tri.a.pos[3];
+  wb = tri.b.pos[3];
+  wc = tri.c.pos[3];
+  Az = tri.a.pos[2]/abs(wa);
+  Bz = tri.b.pos[2]/abs(wb);
+  Cz = tri.c.pos[2]/abs(wc);
+
   vec2 a, b, c;
   a[0] = (tri.a.pos[0] + 1)*width/2 -0.5;
   a[1] = (tri.a.pos[1] + 1)*height/2 - 0.5;
@@ -110,10 +171,41 @@ void Rasterize_Triangle(const Triangle &tri,
   c[0] = (tri.c.pos[0] + 1)*width/2 -0.5;
   c[1] = (tri.c.pos[1] + 1)*height/2 - 0.5;
 
-  float area = triangle_area(a,b,c);
+  // cout << "a[0] ="<< a[0]<< " a[1] ="<< a[1]<<endl;
+  // cout << "b[0] ="<< b[0]<< " b[1] ="<< b[1]<<endl;
+  // cout << "c[0] ="<< c[0]<< " c[1] ="<< c[1]<<endl;
 
-  for(int i = 0; i < width; i++){
-    for(int j = 0; j< height; j++){
+  int mini, minj, maxi, maxj;
+
+  mini = min(a[0], min(b[0],c[0]));
+  mini = max(min(width,mini - 2), 0);
+
+  minj = min(a[1], min(b[1],c[1]));
+  minj = max(min(height,minj - 2), 0);
+
+  maxi = max(a[0], max(b[0],c[0]));
+  maxi = min(width , max(maxi + 2, 0));
+
+  maxj = max(a[1], max(b[1],c[1]));
+  maxj = max(0 , min(maxj + 2, height));
+
+  // cout<< "mini " << mini << " maxi " << maxi << endl;
+  //
+  // cout<< "minj " << minj << " maxj " << maxj << endl;
+  if(MMode == MGL_MODELVIEW){
+    //cout << "Here"<<endl;
+    mini = 0;
+    maxi = width;
+    minj = 0;
+    maxj = height;
+  }
+
+  float area = triangle_area(a,b,c);
+  for(int j = minj; j< maxj; ++j){
+    for(int i = mini; i < maxi; ++i,++zptr ){
+  // for(int j = 0; j< width; ++j){
+  //   for(int i = 0; i < height; ++i,++zptr ){
+
       vec2 p;
       p[0] = i;
       p[1] = j;
@@ -122,14 +214,33 @@ void Rasterize_Triangle(const Triangle &tri,
       float beta = triangle_area(a,p,c)/area;
       float gamma = triangle_area(a,b,p)/area;
 
-      if(alpha >= 0 && beta >= 0 && gamma >=0 ){
-        data[i+j*width] = Make_Pixel(tri.a.color[0]*255,tri.a.color[1]*255,tri.a.color[2]*255);
-      }
 
+
+      float z_current = Az*alpha + Bz*beta+ Cz*gamma;
+
+      //z_current = std::clamp(z_current,-1.0f, 1.0f);
+      if(alpha >= 0 && beta >= 0 && gamma >=0 ){
+        if(*zptr > z_current){
+            if(z_current >= -1.0f && z_current <= 1.0f ){
+
+                float K = 1 /(alpha *wa + beta * wb + gamma*wc);
+                float alpha_p = alpha * wa * K;
+                float beta_p = beta *wb *K;
+                float gamma_p = gamma * wc * K;
+                K =  1 / (alpha_p/ wa + beta_p/wb + gamma_p/wc);
+                alpha = (alpha_p / wa)* K;
+                beta = (beta_p / wb) * K ;
+                gamma = (gamma_p/wc) * K;
+                float percent_red = tri.a.color[0]*255*alpha + tri.b.color[0]*255*beta +tri.c.color[0]*255*gamma;
+                float percent_green = tri.a.color[1]*255*alpha + tri.b.color[1]*255*beta +tri.c.color[1]*255*gamma;
+                float percent_blue = tri.a.color[2]*255*alpha + tri.b.color[2]*255*beta +tri.c.color[2]*255*gamma;
+                data[i+j*width] = Make_Pixel(percent_red,percent_green,percent_blue);
+                *zptr = z_current;
+          }
+        }
+      }
     }
   }
-
-
 }
 
 /**
@@ -216,8 +327,9 @@ void mglVertex3(MGLfloat x,
   tempv[3] = 1.0f;
 
   //cout <<"tempv: "<<tempv<<endl;
-  tempv = matrix * tempv;
-  //cout <<"Matrix "<< matrix << endl;
+  //tempv = projection_matrix* modelview_matrix* tempv;
+  tempv = Matrix_stack_projection.back()* Matrix_stack_modelview.back()* tempv;
+  //cout <<"Matrix "<< cmat << endl;
   //cout <<"tempv3: "<< tempv[3]<<endl;
   vertex temp(tempv/tempv[3],color);
 
@@ -242,6 +354,17 @@ void mglMatrixMode(MGLmatrix_mode mode)
  */
 void mglPushMatrix()
 {
+  if(MMode == MGL_PROJECTION){
+    if(Matrix_stack_projection.empty() == false){
+       //cout << " Here push projection \n";
+        Matrix_stack_projection.push_back(Matrix_stack_projection.back());
+    }
+  }else{
+    if(Matrix_stack_modelview.empty() == false){
+        //cout << " Here push modelview \n";
+        Matrix_stack_modelview.push_back(Matrix_stack_modelview.back());
+    }
+  }
 }
 
 /**
@@ -250,6 +373,17 @@ void mglPushMatrix()
  */
 void mglPopMatrix()
 {
+  if(MMode == MGL_PROJECTION){
+    if(Matrix_stack_projection.empty() == false){
+      //cout << " Here pop projection \n";
+        Matrix_stack_projection.pop_back();
+    }
+  }else{
+    if(Matrix_stack_modelview.empty() == false){
+        //cout << " Here pop modelview \n";
+        Matrix_stack_modelview.pop_back();
+    }
+  }
 }
 
 /**
@@ -257,12 +391,13 @@ void mglPopMatrix()
  */
 void mglLoadIdentity()
 {
-    if(MMode == MGL_PROJECTION)
-      matrix = {{1.0f,0.0f,0.0f,0.0f,
-                 0.0f,1.0f,0.0f,0.0f,
-                 0.0f,0.0f,1.0f,0.0f,
-                 0.0f,0.0f,0.0f,1.0f}};
+   mat4 I = {{1.0f,0.0f,0.0f,0.0f,
+             0.0f,1.0f,0.0f,0.0f,
+             0.0f,0.0f,1.0f,0.0f,
+             0.0f,0.0f,0.0f,1.0f}};
 
+  mat4& Mstk = top_of_active_matrix_stack();
+  Mstk = I;
 }
 
 /**
@@ -277,8 +412,14 @@ void mglLoadIdentity()
  *
  * where ai is the i'th entry of the array.
  */
-void mglLoadMatrix(const MGLfloat *matrix)
+void mglLoadMatrix(const MGLfloat *m)
 {
+  mat4& Mstk = top_of_active_matrix_stack();
+
+  Mstk = {{m[0],m[1],m[2],m[3],
+          m[4],m[5],m[6],m[7],
+          m[8],m[9],m[10],m[11],
+          m[12],m[13],m[14],m[15]}};
 
 }
 
@@ -294,8 +435,18 @@ void mglLoadMatrix(const MGLfloat *matrix)
  *
  * where ai is the i'th entry of the array.
  */
-void mglMultMatrix(const MGLfloat *matrix)
+void mglMultMatrix(const MGLfloat *m)
 {
+  mat4& Mstk = top_of_active_matrix_stack();
+
+  mat4 temp = {{m[0],m[1],m[2],m[3],
+                m[4],m[5],m[6],m[7],
+                m[8],m[9],m[10],m[11],
+                m[12],m[13],m[14],m[15]}};
+
+
+
+  Mstk = Mstk*temp;
 }
 
 /**
@@ -306,6 +457,13 @@ void mglTranslate(MGLfloat x,
                   MGLfloat y,
                   MGLfloat z)
 {
+    mat4& Mstk = top_of_active_matrix_stack();
+
+    mat4 trans = {{1, 0, 0, 0,
+                   0, 1, 0, 0,
+                   0, 0, 1, 0,
+                   x, y, z, 1}};
+    Mstk = Mstk * trans;
 }
 
 /**
@@ -318,6 +476,25 @@ void mglRotate(MGLfloat angle,
                MGLfloat y,
                MGLfloat z)
 {
+    float A = angle *M_PI /180;
+    mat4& Mstk = top_of_active_matrix_stack();
+
+    float norm = sqrt(x*x + y*y + z*z);
+    float c =  cos(A);
+    float s = sin(A);
+    x = x/norm;
+    y = y/norm;
+    z = z/norm;
+
+
+
+    mat4 rotate = {{ x*x*(1-c) +c, y*x*(1-c)+z*s,x*z*(1-c)-y*s, 0,
+                     x*y*(1-c)-z*s, y*y*(1-c)+c, y*z*(1-c)+x*s, 0,
+                     x*z*(1-c)+y*z, y*z*(1-c)-x*s, z*z*(1-c)+c, 0,
+                     0, 0, 0, 1}};
+
+   Mstk = Mstk * rotate;
+
 }
 
 /**
@@ -328,6 +505,14 @@ void mglScale(MGLfloat x,
               MGLfloat y,
               MGLfloat z)
 {
+  mat4& Mstk = top_of_active_matrix_stack();
+
+  mat4 scale = {{x, 0, 0 ,0,
+                0, y, 0, 0,
+                0, 0, z, 0,
+                0, 0, 0, 1}};
+
+  Mstk = Mstk *scale;
 }
 
 /**
@@ -341,20 +526,21 @@ void mglFrustum(MGLfloat left,
                 MGLfloat near,
                 MGLfloat far)
 {
-    if(MMode == MGL_PROJECTION){
+
         float A = (right + left)/(right -left);
         float B = (top + bottom)/(top-bottom);
         float C = -(far + near)/(far - near);
         float D = - 2*(far*near)/(far - near);
+        mat4& Mstk = top_of_active_matrix_stack();
 
         mat4 temp = {{2*near/(right-left),0,0,0,
                       0, 2*near/(top-bottom),0,0,
                       A,B,C,-1,
                       0,0,D,0}};
 
-        matrix = temp*matrix;
+        Mstk =  Mstk * temp;
 
-    }
+
 }
 
 /**
@@ -369,7 +555,6 @@ void mglOrtho(MGLfloat left,
               MGLfloat far)
 {
 
-  if (MMode == MGL_PROJECTION){
     float tx = -(right+left)/(right-left);
     float ty = -(top+bottom)/(top-bottom);
     float tz = -(far + near)/(far - near);
@@ -379,14 +564,14 @@ void mglOrtho(MGLfloat left,
                  0.0f,0.0f, -2.0f/(far-near), tz,
                  0.0f,0.0f,0.0f,1.0f}};*/
 
+      mat4& Mstk = top_of_active_matrix_stack();
+
       mat4 temp = {{2.0f/(right-left),0.0f,0.0f,0.0f,
                   0.0f,2.0f/(top-bottom),0.0f,0.0f,
                   0.0f,0.0f,-2.0f/(far-near),0.0f,
                   tx,ty,tz,1.0f}};
 
-      matrix = temp*matrix;
-  }
-
+     Mstk = Mstk*temp;
 
 }
 

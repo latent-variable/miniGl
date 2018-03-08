@@ -66,6 +66,7 @@ MGLmatrix_mode MMode;
 vec3 color;
 //list of vertex
 vector<vertex> vertices;
+vector<MGLfloat> z_buffering;
 
 //stack of matrix
 mat4 I = {{1.0f,0.0f,0.0f,0.0f,
@@ -122,6 +123,8 @@ void mglReadPixels(MGLsize width,
                    MGLsize height,
                    MGLpixel *data)
 {
+
+
   memset(data, 0, sizeof(MGLpixel)*width * height);
   #if 0
   for(unsigned i = 0; i < width; i++){
@@ -130,6 +133,7 @@ void mglReadPixels(MGLsize width,
     }
   }
   #endif
+  z_buffering.assign(width*height,100000000);
 
   for(unsigned i = 0; i < Triangles.size();i++){
     Rasterize_Triangle(Triangles[i],width, height,data);
@@ -146,6 +150,19 @@ void Rasterize_Triangle(const Triangle &tri,
                         int height,
                         MGLpixel* data)
 {
+  //z-buffering
+  MGLfloat* zptr = z_buffering.data();
+
+  MGLfloat Az, Bz, Cz, wa, wb, wc;
+  wa = tri.a.pos[3];
+  wb = tri.b.pos[3];
+  wc = tri.c.pos[3];
+
+  printf("wa: %f, wb: %f,wc: %f\n",wa,wb,wc );
+  Az = tri.a.pos[2]/abs(wa);
+  Bz = tri.b.pos[2]/abs(wb);
+  Cz = tri.c.pos[2]/abs(wc);
+
   vec2 a, b, c;
   a[0] = (tri.a.pos[0] + 1)*width/2 -0.5;
   a[1] = (tri.a.pos[1] + 1)*height/2 - 0.5;
@@ -156,10 +173,41 @@ void Rasterize_Triangle(const Triangle &tri,
   c[0] = (tri.c.pos[0] + 1)*width/2 -0.5;
   c[1] = (tri.c.pos[1] + 1)*height/2 - 0.5;
 
-  float area = triangle_area(a,b,c);
+  // cout << "a[0] ="<< a[0]<< " a[1] ="<< a[1]<<endl;
+  // cout << "b[0] ="<< b[0]<< " b[1] ="<< b[1]<<endl;
+  // cout << "c[0] ="<< c[0]<< " c[1] ="<< c[1]<<endl;
 
-  for(int i = 0; i < width; i++){
-    for(int j = 0; j< height; j++){
+  int mini, minj, maxi, maxj;
+
+  mini = min(a[0], min(b[0],c[0]));
+  mini = max(min(width,mini - 2), 0);
+
+  minj = min(a[1], min(b[1],c[1]));
+  minj = max(min(height,minj - 2), 0);
+
+  maxi = max(a[0], max(b[0],c[0]));
+  maxi = min(width , max(maxi + 2, 0));
+
+  maxj = max(a[1], max(b[1],c[1]));
+  maxj = max(0 , min(maxj + 2, height));
+
+  // cout<< "mini " << mini << " maxi " << maxi << endl;
+  //
+  // cout<< "minj " << minj << " maxj " << maxj << endl;
+  if(MMode == MGL_MODELVIEW){
+    //cout << "Here"<<endl;
+    mini = 0;
+    maxi = width;
+    minj = 0;
+    maxj = height;
+  }
+
+  float area = triangle_area(a,b,c);
+  for(int j = minj; j< maxj; ++j){
+    for(int i = mini; i < maxi; ++i,++zptr ){
+  // for(int j = 0; j< width; ++j){
+  //   for(int i = 0; i < height; ++i,++zptr ){
+
       vec2 p;
       p[0] = i;
       p[1] = j;
@@ -168,14 +216,43 @@ void Rasterize_Triangle(const Triangle &tri,
       float beta = triangle_area(a,p,c)/area;
       float gamma = triangle_area(a,b,p)/area;
 
-      if(alpha >= 0 && beta >= 0 && gamma >=0 ){
-        data[i+j*width] = Make_Pixel(tri.a.color[0]*255,tri.a.color[1]*255,tri.a.color[2]*255);
-      }
 
+
+      float z_current = Az*alpha + Bz*beta+ Cz*gamma;
+
+      //z_current = std::clamp(z_current,-1.0f, 1.0f);
+      if(alpha >= 0 && beta >= 0 && gamma >=0 ){
+        if(*zptr > z_current){
+            if(z_current >= -1.0f && z_current <= 1.0f ){
+                //printf("1. alpha:%f ,beta: %f, gamma: %f\n", alpha, beta, gamma);
+                //perspective correct interpolations
+                float K = 1 /(alpha *wa + beta * wb + gamma*wc);
+
+                float alpha_p = alpha * wa * K;
+                float beta_p = beta *wb *K;
+                float gamma_p = gamma * wc * K;
+                  //K =  1/ (alpha_p/ wa + beta_p/wb + gamma_p/wc);
+                alpha = alpha_p / (wa* K);
+                beta = beta_p /( wb * K) ;
+                gamma = gamma_p /( wc *K);
+                //printf("2. alpha:%f ,beta: %f, gamma: %f\n", alpha_p, beta_p, gamma_p);
+                K = (alpha_p/ wa + beta_p/wb + gamma_p/wc);
+                alpha = (alpha_p / wa)/ K;
+                beta = (beta_p /wb) / K ;
+                gamma = (gamma_p / wc) /K;
+
+                //printf("3. alpha:%f ,beta: %f, gamma: %f\n", alpha, beta, gamma);
+
+                float percent_red = tri.a.color[0]*255*alpha + tri.b.color[0]*255*beta +tri.c.color[0]*255*gamma;
+                float percent_green = tri.a.color[1]*255*alpha + tri.b.color[1]*255*beta +tri.c.color[1]*255*gamma;
+                float percent_blue = tri.a.color[2]*255*alpha + tri.b.color[2]*255*beta +tri.c.color[2]*255*gamma;
+                data[i+j*width] = Make_Pixel(percent_red,percent_green,percent_blue);
+                *zptr = z_current;
+          }
+        }
+      }
     }
   }
-
-
 }
 
 /**
@@ -347,8 +424,14 @@ void mglLoadIdentity()
  *
  * where ai is the i'th entry of the array.
  */
-void mglLoadMatrix(const MGLfloat *matrix)
+void mglLoadMatrix(const MGLfloat *m)
 {
+  mat4& Mstk = top_of_active_matrix_stack();
+
+  Mstk = {{m[0],m[1],m[2],m[3],
+          m[4],m[5],m[6],m[7],
+          m[8],m[9],m[10],m[11],
+          m[12],m[13],m[14],m[15]}};
 
 }
 
@@ -364,8 +447,18 @@ void mglLoadMatrix(const MGLfloat *matrix)
  *
  * where ai is the i'th entry of the array.
  */
-void mglMultMatrix(const MGLfloat *matrix)
+void mglMultMatrix(const MGLfloat *m)
 {
+  mat4& Mstk = top_of_active_matrix_stack();
+
+  mat4 temp = {{m[0],m[1],m[2],m[3],
+                m[4],m[5],m[6],m[7],
+                m[8],m[9],m[10],m[11],
+                m[12],m[13],m[14],m[15]}};
+
+
+
+  Mstk = Mstk*temp;
 }
 
 /**

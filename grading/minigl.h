@@ -7,31 +7,12 @@
 #ifndef __MINIGL_H__
 #define __MINIGL_H__
 
-#include "vec.h"
-
 typedef int           MGLint;
 typedef unsigned char MGLbyte;
 typedef unsigned int  MGLsize;
 typedef unsigned int  MGLpixel;
 typedef float         MGLfloat;
 typedef bool          MGLbool;
-typedef vec<MGLfloat,4> vec4;   //data structure storing a 4 dimensional vector, see vec.h
-
-//vertex structure
-struct vertex
-{
-
-  vertex(){}
-  vertex(vec4 p,vec3 c):  color(c),pos(p){}
-  vec3 color;
-  vec4 pos;
-};
-
-//structure that stores the 3 vertices of a triangle
-struct Triangle
-{
-  vertex a,b,c;
-};
 
 typedef enum {
     MGL_MODELVIEW,
@@ -72,16 +53,10 @@ void mglReadPixels(MGLsize width,
                    MGLsize height,
                    MGLpixel *data);
 
- //Helper fuction for mglReadPixels
-void Rasterize_Triangle(const Triangle &tri,
-                        int width,
-                        int height,
-                        MGLpixel* data);
 /**
  * Start specifying the vertices for a group of primitives,
  * whose type is specified by the given mode.
  */
-
 void mglBegin(MGLpoly_mode mode);
 
 /**

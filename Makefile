@@ -22,7 +22,7 @@ all: $(TARGET) $(TARGET2)
 
 $(TARGET): $(OBJS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -o $(TARGET) $(OBJS) $(LIBS)
-$(TARGET2): $(OBJS) 
+$(TARGET2): $(OBJS)
 	$(CXX) -c $(CXXFLAGS2) $(CPPFLAGS) -o main-nogl.o main.cpp
 	$(CXX) -c $(CXXFLAGS2) $(CPPFLAGS) -o parse-nogl.o parse.cpp
 	$(CXX) $(CXXFLAGS2) $(CPPFLAGS) -o $(TARGET2) $(OBJS2) $(LIBS2)
